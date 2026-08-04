@@ -34,6 +34,26 @@
     padding:28px;margin-bottom:20px;transition:all .25s;
   }
 
+  /* ── mode tabs ────────────────────────────────── */
+  .tabs{display:flex;gap:8px;justify-content:center;margin-bottom:24px}
+  .tab{
+    padding:10px 24px;background:#161b22;border:1px solid #30363d;
+    border-radius:8px;color:#8b949e;font-family:inherit;font-size:13px;
+    cursor:pointer;transition:all .2s;
+  }
+  .tab:hover{color:#c9d1d9;border-color:#58a6ff}
+  .tab.active{background:#1f6feb22;border-color:#58a6ff;color:#58a6ff}
+
+  /* ── extraction code display ──────────────────── */
+  .extract-block{
+    background:#0d1117;border:1px solid #30363d;border-radius:8px;
+    padding:16px;margin-bottom:16px;text-align:center;
+  }
+  .extract-code{
+    font-size:28px;font-weight:700;color:#d2991d;letter-spacing:8px;
+    margin:6px 0;
+  }
+
   /* ── section visibility ───────────────────────── */
   .section{display:none}
   .section.active{display:block}
@@ -211,6 +231,11 @@
     <p>限时文件分享  ·  阅后即焚  ·  端到端</p>
   </div>
 
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-mode="upload">上传文件</button>
+    <button class="tab" data-mode="retrieve">提取文件</button>
+  </div>
+
   <!-- ── Step 1: Verification ────────────────────── -->
   <div class="card section active" id="verify-section">
     <div class="code-section">
@@ -269,10 +294,43 @@
     </div>
   </div>
 
+  <!-- ── Retrieve ────────────────────────────────── -->
+  <div class="card section" id="retrieve-section">
+    <div class="code-section">
+      <div class="label">Extract Code</div>
+      <div class="hint">
+        输入提取码以打开文件下载页<br>
+        提取码由上传成功后生成
+      </div>
+    </div>
+    <div class="input-group">
+      <input class="input" id="retrieve-input" type="text" placeholder="输入 6 位提取码" maxlength="6" autocomplete="off">
+      <button class="btn btn-primary" id="btn-retrieve">提取</button>
+    </div>
+    <div id="retrieve-error" style="color:#f85149;font-size:12px;margin-top:10px;display:none"></div>
+
+    <div class="terminal-block" style="margin-top:20px">
+      <div class="term-header">
+        <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+        <span class="term-title">terminal  ·  retrieve</span>
+      </div>
+      <pre id="term-retrieve-main">curl -X POST http://localhost:3000/api/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"code":"------"}'</pre>
+      <button class="term-copy" id="btn-copy-term-retrieve">复制</button>
+    </div>
+  </div>
+
   <!-- ── Step 3: Result ──────────────────────────── -->
   <div class="card section" id="result-section">
-    <div style="font-size:14px;color:#7ee787;margin-bottom:4px">&#x2713; 上传成功</div>
+    <div style="font-size:14px;color:#7ee787;margin-bottom:4px" id="result-title">&#x2713; 上传成功</div>
     <div style="font-size:12px;color:#8b949e;margin-bottom:16px" id="result-fileinfo"></div>
+    <div class="extract-block" id="result-extract-block">
+      <div class="label">Extract Code</div>
+      <div class="extract-code" id="result-extract">------</div>
+      <div class="hint">凭此提取码可在「提取文件」中打开本下载页</div>
+      <button class="copy-btn" id="btn-copy-extract" style="margin-top:10px">复制提取码</button>
+    </div>
     <div class="result-row">
       <div class="result-left">
         <div class="label" style="margin-bottom:6px">Download Link</div>
@@ -303,12 +361,15 @@
 <script>
 /* ── state ──────────────────────────────────────── */
 const S = {
+  mode: 'upload',
+  resultMode: 'upload',
   code: '',
   codeTimer: null,
   codeExp: 0,
   file: null,
   expiry: '30m',
   result: null,
+  extractCode: '',
   countdownTimer: null,
 };
 
@@ -345,9 +406,25 @@ async function api(url, opts = {}) {
 }
 
 function showSection(id) {
-  ['verify-section', 'upload-section', 'result-section'].forEach(s => $(`#${s}`).classList.remove('active'));
+  ['verify-section', 'upload-section', 'result-section', 'retrieve-section'].forEach(s => $(`#${s}`).classList.remove('active'));
   $(`#${id}`).classList.add('active');
 }
+
+/* ── mode tabs ─────────────────────────────────── */
+function setMode(mode) {
+  if (mode === S.mode) return;
+  S.mode = mode;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  clearInterval(S.countdownTimer);
+  $('#progress-wrap').style.display = 'none';
+  if (mode === 'upload') showSection('verify-section');
+  else showSection('retrieve-section');
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.tab');
+  if (tab) setMode(tab.dataset.mode);
+});
 
 /* ── terminal command updater ──────────────────── */
 function updateTerminal() {
@@ -358,6 +435,12 @@ function updateTerminal() {
     `curl -X POST ${origin}/api/upload \\\n  -F "file=@/path/to/your/file" \\\n  -F "code=${code}" \\\n  -F "expiry=${expiry}"`;
   setupCopyBtn('btn-copy-term-main',
     `curl -X POST ${origin}/api/upload -F "file=@/path/to/file" -F "code=${code}" -F "expiry=${expiry}"`);
+
+  const extract = S.extractCode || '------';
+  $('#term-retrieve-main').textContent =
+    `curl -X POST ${origin}/api/retrieve \\\n  -H "Content-Type: application/json" \\\n  -d '{"code":"${extract}"}'`;
+  setupCopyBtn('btn-copy-term-retrieve',
+    `curl -X POST ${origin}/api/retrieve -H "Content-Type: application/json" -d '{"code":"${extract}"}'`);
 }
 
 /* ── code ───────────────────────────────────────── */
@@ -494,7 +577,8 @@ async function doUpload() {
     });
 
     S.result = result;
-    showResult();
+    S.extractCode = result.extractCode || '';
+    showResult('upload');
   } catch (e) {
     toast(e.message, 'error');
     btn.disabled = false;
@@ -508,31 +592,47 @@ async function doUpload() {
 }
 
 /* ── result ─────────────────────────────────────── */
-function showResult() {
+function showResult(mode = 'upload') {
+  S.resultMode = mode;
   showSection('result-section');
   const r = S.result;
   const origin = window.location.origin;
   const fullUrl = origin + r.url;
 
+  $('#result-title').textContent = mode === 'upload' ? '\u2713 上传成功' : '\u2713 提取成功';
   $('#result-fileinfo').textContent = `${r.originalName}  ·  ${fmtSize(r.size)}`;
   $('#result-url').value = fullUrl;
   $('#result-qr').src = `/api/qr?text=${encodeURIComponent(fullUrl)}`;
   $('#countdown').textContent = '加载中...';
 
+  if (r.extractCode) {
+    $('#result-extract').textContent = r.extractCode;
+    $('#result-extract-block').style.display = 'block';
+  } else {
+    $('#result-extract-block').style.display = 'none';
+  }
+
   // terminal download command
   $('#term-download').textContent = `curl -O ${fullUrl}`;
+  $('#btn-new').textContent = mode === 'upload' ? '上传新文件' : '返回提取';
 
   // copy buttons
   setupCopyBtn('btn-copy-url', fullUrl);
   setupCopyBtn('btn-copy-dl', `curl -O ${fullUrl}`);
+  setupCopyBtn('btn-copy-extract', r.extractCode || '');
 
   startResultCountdown();
 }
 
 function setupCopyBtn(id, text) {
   const btn = $('#' + id);
+  btn._copyText = text;
+  if (btn._bound) return;
+  btn._bound = true;
   btn.addEventListener('click', () => {
-    navigator.clipboard.writeText(text).then(() => {
+    const t = btn._copyText;
+    if (!t) return;
+    navigator.clipboard.writeText(t).then(() => {
       btn.textContent = '已复制';
       btn.classList.add('copied');
       setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
@@ -592,7 +692,46 @@ $('#btn-new').addEventListener('click', () => {
   clearFile();
   clearInterval(S.countdownTimer);
   $('#progress-wrap').style.display = 'none';
-  showSection('upload-section');
+  if (S.resultMode === 'upload') showSection('upload-section');
+  else showSection('retrieve-section');
+});
+
+/* ── retrieve ───────────────────────────────────── */
+function doRetrieve() {
+  const input = $('#retrieve-input').value.trim();
+  if (input.length !== 6 || !/^\d{6}$/.test(input)) {
+    $('#retrieve-error').textContent = '请输入 6 位数字提取码';
+    $('#retrieve-error').style.display = 'block';
+    return;
+  }
+  const btn = $('#btn-retrieve');
+  btn.disabled = true;
+  btn.textContent = '提取中...';
+  api('/api/retrieve', { method: 'POST', body: JSON.stringify({ code: input }) })
+    .then(data => {
+      S.result = data;
+      S.extractCode = data.extractCode || '';
+      updateTerminal();
+      showResult('retrieve');
+    })
+    .catch(e => {
+      $('#retrieve-error').textContent = e.message;
+      $('#retrieve-error').style.display = 'block';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.textContent = '提取';
+    });
+}
+
+$('#btn-retrieve').addEventListener('click', doRetrieve);
+$('#retrieve-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doRetrieve();
+});
+$('#retrieve-input').addEventListener('input', () => {
+  $('#retrieve-error').style.display = 'none';
+  S.extractCode = $('#retrieve-input').value.trim();
+  updateTerminal();
 });
 
 /* ── init ───────────────────────────────────────── */

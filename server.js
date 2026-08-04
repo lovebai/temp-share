@@ -30,6 +30,39 @@ function purgeCodes() {
   for (const [k, v] of codes) { if (t > v.exp) codes.delete(k); }
 }
 
+/* ── extraction codes (persisted in metadata) ───── */
+function extractCodeExists(code) {
+  if (!fs.existsSync(META_DIR)) return false;
+  for (const f of fs.readdirSync(META_DIR)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(META_DIR, f), 'utf8'));
+      if (meta.extractCode === code) return true;
+    } catch (_) { /* skip */ }
+  }
+  return false;
+}
+
+function makeExtractCode() {
+  let code;
+  do {
+    code = Math.floor(100000 + Math.random() * 900000).toString();
+  } while (extractCodeExists(code));
+  return code;
+}
+
+function findMetaByExtractCode(code) {
+  if (!fs.existsSync(META_DIR)) return null;
+  for (const f of fs.readdirSync(META_DIR)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(META_DIR, f), 'utf8'));
+      if (meta.extractCode === code) return path.join(META_DIR, f);
+    } catch (_) { /* skip */ }
+  }
+  return null;
+}
+
 /* ── safe delete (bypass sandbox trash shim) ──────── */
 function safeUnlink(fp) {
   try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch (_) { /* skip */ }
@@ -114,8 +147,11 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   const now = Date.now();
   const id  = uuidv4();
 
+  const extractCode = makeExtractCode();
+
   const meta = {
     id,
+    extractCode,
     originalName: req.file.originalname,
     storedName:   req.file.filename,
     size:         req.file.size,
@@ -129,6 +165,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
 
   res.json({
     id:           meta.id,
+    extractCode:  meta.extractCode,
     url:          `/api/download/${meta.id}`,
     originalName: meta.originalName,
     size:         meta.size,
@@ -137,20 +174,33 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   });
 });
 
+/* ── error page ─────────────────────────────────── */
+function sendErrorPage(res, status, file) {
+  const q = new URLSearchParams({
+    code: String(status),
+    title: status === 410 ? '文件已过期' : '文件不存在或已过期',
+    desc: status === 410
+      ? '该文件已超过可分享时限，已被自动删除。请联系分享者重新上传。'
+      : '该链接已被删除、已过期或从未存在过。请向分享者确认，或返回首页生成新的链接。',
+  });
+  if (file) q.set('file', file);
+  res.status(status).sendFile(path.join(__dirname, 'public', 'error.html'));
+}
+
 /* ── API: download ───────────────────────────────── */
 app.get('/api/download/:id', (req, res) => {
   const mp = path.join(META_DIR, `${req.params.id}.json`);
-  if (!fs.existsSync(mp)) return res.status(404).send('文件不存在或已过期');
+  if (!fs.existsSync(mp)) return sendErrorPage(res, 404);
 
   const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
   if (Date.now() > meta.expiresAt) {
     safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
     safeUnlink(mp);
-    return res.status(410).send('文件已过期');
+    return sendErrorPage(res, 410, meta.originalName);
   }
 
   const fp = path.join(UPLOAD_DIR, meta.storedName);
-  if (!fs.existsSync(fp)) return res.status(404).send('文件不存在');
+  if (!fs.existsSync(fp)) return sendErrorPage(res, 404, meta.originalName);
 
   res.download(fp, meta.originalName);
 });
@@ -187,6 +237,45 @@ app.get('/api/info/:id', (req, res) => {
     expiresAt:    meta.expiresAt,
     remaining:    meta.expiresAt - Date.now(),
   });
+});
+
+/* ── API: retrieve by extraction code ───────────── */
+app.post('/api/retrieve', (req, res) => {
+  const { code } = req.body;
+  if (!code || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'invalid_code', message: '提取码格式不正确，应为 6 位数字' });
+  }
+
+  const mp = findMetaByExtractCode(code);
+  if (!mp) {
+    return res.status(404).json({ error: 'not_found', message: '提取码无效或文件不存在' });
+  }
+
+  const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
+  if (Date.now() > meta.expiresAt) {
+    safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
+    safeUnlink(mp);
+    return res.status(410).json({ error: 'expired', message: '文件已过期' });
+  }
+
+  res.json({
+    id:           meta.id,
+    extractCode:  meta.extractCode,
+    url:          `/api/download/${meta.id}`,
+    originalName: meta.originalName,
+    size:         meta.size,
+    expiresAt:    meta.expiresAt,
+    remaining:    meta.expiresAt - Date.now(),
+    expiry:       meta.expiry,
+  });
+});
+
+/* ── 404 catch-all ─────────────────────────────── */
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'not_found', message: '接口不存在' });
+  }
+  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'));
 });
 
 /* ── start ───────────────────────────────────────── */
