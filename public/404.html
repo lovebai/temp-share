@@ -94,15 +94,6 @@
   .title{font-size:26px;font-weight:700;color:#e6edf3;letter-spacing:-0.5px;margin-bottom:10px}
   .desc{font-size:13px;color:#8b949e;line-height:1.8;margin-bottom:8px}
 
-  /* ── path display ─────────────────────────────── */
-  .pathbox{
-    margin-top:22px;background:#0d1117;border:1px dashed #30363d;
-    border-radius:10px;padding:12px 16px;font-size:12px;color:#6e7681;
-    word-break:break-all;display:flex;align-items:center;gap:8px;justify-content:center;
-  }
-  .pathbox .arrow{color:#58a6ff}
-  .pathbox span#path{color:#c9d1d9}
-
   /* ── buttons ──────────────────────────────────── */
   .actions{display:flex;gap:10px;justify-content:center;margin-top:32px}
   .btn{
@@ -149,11 +140,6 @@
       您访问的页面可能已被移除、移动或从未存在过。<br>请检查网址是否正确，或返回首页继续。
     </div>
 
-    <div class="pathbox">
-      <span class="arrow">&#x21E5;</span>
-      <span id="path">/</span>
-    </div>
-
     <div class="actions">
       <a class="btn btn-primary" href="/">&#x21B5; 返回首页</a>
     </div>
@@ -162,8 +148,5 @@
   <div class="footer">TempShare · 限时文件分享 · 文件到期后自动删除</div>
 </div>
 
-<script>
-document.getElementById('path').textContent = location.pathname + location.search || '/';
-</script>
 </body>
 </html>
