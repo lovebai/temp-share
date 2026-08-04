@@ -192,7 +192,8 @@ temp-share/
 ├── public/
 │   ├── index.html     # 前端页面（独立，零外部依赖）
 │   ├── error.html     # 文件失效提示页（404 / 410）
-│   └── 404.html       # 未知路由 404 页面
+│   ├── 404.html       # 未知路由 404 页面
+│   └── favicon.svg    # 站点图标
 ├── uploads/           # 上传的文件（.gitignore）
 ├── metadata/          # 文件元数据 JSON（.gitignore）
 ├── package.json
@@ -204,3 +205,8 @@ temp-share/
 - **后端** — Node.js + Express + multer + uuid + qrcode
 - **前端** — 原生 HTML/CSS/JS，JetBrains Mono 等宽字体，暗色终端风格
 - **二维码** — 本地 `qrcode` 库生成下载链接二维码
+
+## 链接
+
+- **GitHub** — https://github.com/lovebai/temp-share
+- **博客** — https://bducds.de/
