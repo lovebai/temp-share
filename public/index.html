@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TempShare</title>
+<style>
+  /* ── reset & base ─────────────────────────────── */
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:'JetBrains Mono','Fira Code','Cascadia Code','SF Mono',Consolas,monospace;
+    background:#0b0c0e;color:#c9d1d9;min-height:100vh;
+    display:flex;align-items:center;justify-content:center;
+  }
+  ::selection{background:#58a6ff33}
+  ::-webkit-scrollbar{width:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+
+  /* ── container ────────────────────────────────── */
+  .container{width:100%;max-width:680px;padding:32px 24px}
+
+  /* ── header ───────────────────────────────────── */
+  .header{text-align:center;margin-bottom:40px}
+  .header h1{
+    font-size:28px;font-weight:600;color:#e6edf3;letter-spacing:-0.5px;
+    margin-bottom:6px;
+  }
+  .header p{font-size:13px;color:#8b949e}
+
+  /* ── card ─────────────────────────────────────── */
+  .card{
+    background:#161b22;border:1px solid #30363d;border-radius:12px;
+    padding:28px;margin-bottom:20px;transition:all .25s;
+  }
+
+  /* ── section visibility ───────────────────────── */
+  .section{display:none}
+  .section.active{display:block}
+
+  /* ── code display ─────────────────────────────── */
+  .code-section{text-align:center;margin-bottom:4px}
+  .code-section .label{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+  .code-section .code-display{
+    font-size:36px;font-weight:700;color:#58a6ff;letter-spacing:8px;
+    margin-bottom:6px;
+  }
+  .code-section .hint{font-size:12px;color:#6e7681;line-height:1.6}
+
+  /* ── input group ──────────────────────────────── */
+  .input-group{display:flex;gap:10px;margin-top:20px}
+  .input{
+    flex:1;background:#0d1117;border:1px solid #30363d;border-radius:8px;
+    padding:12px 16px;color:#c9d1d9;font-family:inherit;font-size:16px;
+    letter-spacing:4px;text-align:center;outline:none;transition:border-color .2s;
+  }
+  .input:focus{border-color:#58a6ff}
+  .input.error{border-color:#f85149}
+
+  /* ── buttons ──────────────────────────────────── */
+  .btn{
+    padding:12px 24px;border:none;border-radius:8px;font-family:inherit;
+    font-size:14px;font-weight:500;cursor:pointer;transition:all .2s;
+    white-space:nowrap;
+  }
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn-primary{background:#238636;color:#fff}
+  .btn-primary:hover:not(:disabled){background:#2ea043}
+  .btn-secondary{background:#21262d;color:#c9d1d9;border:1px solid #30363d}
+  .btn-secondary:hover:not(:disabled){background:#30363d}
+  .btn-refresh{background:transparent;color:#8b949e;border:1px solid #30363d}
+  .btn-refresh:hover:not(:disabled){color:#c9d1d9;background:#21262d}
+
+  /* ── drop zone ────────────────────────────────── */
+  .dropzone{
+    border:2px dashed #30363d;border-radius:12px;padding:48px 24px;
+    text-align:center;cursor:pointer;transition:all .25s;position:relative;
+  }
+  .dropzone:hover,.dropzone.dragover{
+    border-color:#58a6ff;background:#58a6ff08;
+  }
+  .dropzone .dz-icon{font-size:40px;margin-bottom:12px;opacity:.6}
+  .dropzone .dz-text{font-size:14px;color:#8b949e;margin-bottom:8px}
+  .dropzone .dz-hint{font-size:12px;color:#484f58}
+  .dropzone .dz-hint kbd{
+    display:inline-block;background:#21262d;border:1px solid #30363d;
+    border-radius:4px;padding:2px 6px;font-family:inherit;font-size:11px;
+    margin:0 2px;
+  }
+
+  /* ── expiry selector ──────────────────────────── */
+  .expiry-selector{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+  .expiry-opt{
+    flex:1;min-width:56px;text-align:center;padding:10px 8px;
+    background:#0d1117;border:1px solid #30363d;border-radius:8px;
+    color:#8b949e;font-size:12px;font-family:inherit;cursor:pointer;
+    transition:all .2s;
+  }
+  .expiry-opt:hover{border-color:#58a6ff;color:#c9d1d9}
+  .expiry-opt.selected{background:#1f6feb22;border-color:#58a6ff;color:#58a6ff}
+
+  /* ── file info ────────────────────────────────── */
+  .file-preview{
+    display:flex;align-items:center;gap:12px;padding:12px 16px;
+    background:#0d1117;border:1px solid #30363d;border-radius:8px;
+    margin-top:16px;
+  }
+  .file-preview .fp-icon{font-size:24px;flex-shrink:0}
+  .file-preview .fp-info{flex:1;min-width:0}
+  .file-preview .fp-name{font-size:13px;color:#e6edf3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file-preview .fp-size{font-size:11px;color:#8b949e;margin-top:2px}
+  .file-preview .fp-remove{
+    background:none;border:none;color:#8b949e;cursor:pointer;
+    font-size:18px;padding:4px;line-height:1;
+  }
+  .file-preview .fp-remove:hover{color:#f85149}
+
+  /* ── progress ─────────────────────────────────── */
+  .progress-wrap{margin-top:16px}
+  .progress-bar{
+    width:100%;height:6px;background:#21262d;border-radius:3px;overflow:hidden;
+  }
+  .progress-fill{
+    height:100%;background:#238636;border-radius:3px;transition:width .3s;
+    width:0%;
+  }
+  .progress-text{font-size:11px;color:#8b949e;margin-top:6px;text-align:right}
+
+  /* ── result ───────────────────────────────────── */
+  .result-row{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+  .result-left{flex:1;min-width:200px}
+  .result-qr{
+    width:140px;height:140px;border-radius:8px;background:#fff;
+    padding:6px;flex-shrink:0;
+  }
+  .result-url{
+    display:flex;gap:10px;margin-top:16px;align-items:center;
+  }
+  .result-url .input{flex:1;font-size:13px;letter-spacing:0;text-align:left}
+  .copy-btn{
+    padding:12px 16px;background:#21262d;border:1px solid #30363d;
+    border-radius:8px;color:#c9d1d9;cursor:pointer;font-family:inherit;
+    font-size:13px;transition:all .2s;white-space:nowrap;
+  }
+  .copy-btn:hover{background:#30363d}
+  .copy-btn.copied{background:#238636;border-color:#238636;color:#fff}
+
+  /* ── terminal block ───────────────────────────── */
+  .terminal-block{
+    background:#0d1117;border:1px solid #30363d;border-radius:8px;
+    padding:16px;margin-top:16px;position:relative;overflow-x:auto;
+  }
+  .terminal-block .term-header{
+    display:flex;align-items:center;gap:8px;margin-bottom:12px;
+  }
+  .terminal-block .term-dot{
+    width:10px;height:10px;border-radius:50%;
+  }
+  .terminal-block .term-dot.r{background:#f85149}
+  .terminal-block .term-dot.y{background:#d2991d}
+  .terminal-block .term-dot.g{background:#238636}
+  .terminal-block .term-title{font-size:11px;color:#8b949e;margin-left:4px}
+  .terminal-block pre{
+    font-family:inherit;font-size:12px;color:#7ee787;line-height:1.7;
+    white-space:pre-wrap;word-break:break-all;margin:0;
+  }
+  .terminal-block .term-copy{
+    position:absolute;top:12px;right:12px;padding:6px 12px;
+    background:#21262d;border:1px solid #30363d;border-radius:6px;
+    color:#c9d1d9;font-family:inherit;font-size:11px;cursor:pointer;
+    transition:all .2s;
+  }
+  .terminal-block .term-copy:hover{background:#30363d}
+
+  /* ── countdown ────────────────────────────────── */
+  .countdown{font-size:12px;color:#d2991d;margin-top:12px;text-align:right}
+  .countdown.expired{color:#f85149}
+
+  /* ── toast ────────────────────────────────────── */
+  .toast{
+    position:fixed;top:24px;left:50%;transform:translateX(-50%);
+    padding:12px 24px;border-radius:8px;font-size:13px;font-family:inherit;
+    z-index:999;animation:toastIn .3s ease;pointer-events:none;
+    box-shadow:0 4px 12px #00000040;
+  }
+  .toast.success{background:#238636;color:#fff}
+  .toast.error{background:#da3633;color:#fff}
+  .toast.info{background:#1f6feb;color:#fff}
+  @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+  /* ── footer ───────────────────────────────────── */
+  .footer{text-align:center;font-size:11px;color:#484f58;margin-top:32px}
+
+  /* ── responsive ───────────────────────────────── */
+  @media(max-width:560px){
+    .container{padding:20px 16px}
+    .card{padding:20px}
+    .code-section{text-align:center}
+    .input-group{flex-direction:column}
+    .expiry-selector{gap:6px}
+    .expiry-opt{min-width:48px;font-size:11px;padding:8px 4px}
+    .dropzone{padding:32px 16px}
+    .header h1{font-size:22px}
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>&#x25C7; TempShare</h1>
+    <p>限时文件分享  ·  阅后即焚  ·  端到端</p>
+  </div>
+
+  <!-- ── Step 1: Verification ────────────────────── -->
+  <div class="card section active" id="verify-section">
+    <div class="code-section">
+      <div class="label">Verification Code</div>
+      <div class="code-display" id="code-display">------</div>
+      <div class="hint">
+        输入上方验证码以解锁上传<br>
+        验证码有效期 <span id="code-timer">5:00</span>
+      </div>
+    </div>
+    <div class="input-group">
+      <input class="input" id="code-input" type="text" placeholder="输入 6 位验证码" maxlength="6" autocomplete="off">
+      <button class="btn btn-primary" id="btn-verify">验证</button>
+      <button class="btn btn-refresh" id="btn-refresh" title="刷新验证码">&#x21BB;</button>
+    </div>
+    <div id="verify-error" style="color:#f85149;font-size:12px;margin-top:10px;display:none"></div>
+
+    <div class="terminal-block" style="margin-top:20px">
+      <div class="term-header">
+        <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+        <span class="term-title">terminal  ·  upload</span>
+      </div>
+      <pre id="term-upload-main">curl -X POST http://localhost:3000/api/upload \
+  -F "file=@/path/to/your/file" \
+  -F "code=------" \
+  -F "expiry=30m"</pre>
+      <button class="term-copy" id="btn-copy-term-main">复制</button>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Upload ──────────────────────────── -->
+  <div class="card section" id="upload-section">
+    <div class="dropzone" id="dropzone">
+      <div class="dz-icon">&#x2913;</div>
+      <div class="dz-text">拖拽文件到此处上传</div>
+      <div class="dz-hint">
+        或 <kbd>Ctrl</kbd> + <kbd>V</kbd> 粘贴文件  ·  单文件最大 50 MB
+      </div>
+    </div>
+    <input type="file" id="file-input" style="display:none">
+    <div class="expiry-selector" id="expiry-selector">
+      <div class="expiry-opt" data-expiry="5m">5分钟</div>
+      <div class="expiry-opt selected" data-expiry="30m">30分钟</div>
+      <div class="expiry-opt" data-expiry="1h">1小时</div>
+      <div class="expiry-opt" data-expiry="6h">6小时</div>
+      <div class="expiry-opt" data-expiry="12h">12小时</div>
+      <div class="expiry-opt" data-expiry="24h">24小时</div>
+    </div>
+    <div id="file-preview"></div>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="progress-text" id="progress-text">0%</div>
+    </div>
+    <div style="margin-top:16px;text-align:right">
+      <button class="btn btn-primary" id="btn-upload" disabled>上传文件</button>
+    </div>
+  </div>
+
+  <!-- ── Step 3: Result ──────────────────────────── -->
+  <div class="card section" id="result-section">
+    <div style="font-size:14px;color:#7ee787;margin-bottom:4px">&#x2713; 上传成功</div>
+    <div style="font-size:12px;color:#8b949e;margin-bottom:16px" id="result-fileinfo"></div>
+    <div class="result-row">
+      <div class="result-left">
+        <div class="label" style="margin-bottom:6px">Download Link</div>
+        <div class="result-url">
+          <input class="input" id="result-url" type="text" readonly>
+          <button class="copy-btn" id="btn-copy-url">复制</button>
+        </div>
+      </div>
+      <img class="result-qr" id="result-qr" src="" alt="QR">
+    </div>
+    <div class="terminal-block" style="margin-top:12px">
+      <div class="term-header">
+        <span class="term-dot r"></span><span class="term-dot y"></span><span class="term-dot g"></span>
+        <span class="term-title">terminal  ·  download</span>
+      </div>
+      <pre id="term-download"></pre>
+      <button class="term-copy" id="btn-copy-dl">复制</button>
+    </div>
+    <div class="countdown" id="countdown"></div>
+    <div style="margin-top:20px;text-align:right">
+      <button class="btn btn-secondary" id="btn-new">上传新文件</button>
+    </div>
+  </div>
+
+  <div class="footer">文件到期后自动删除  ·  无日志  ·  无残留</div>
+</div>
+
+<script>
+/* ── state ──────────────────────────────────────── */
+const S = {
+  code: '',
+  codeTimer: null,
+  codeExp: 0,
+  file: null,
+  expiry: '30m',
+  result: null,
+  countdownTimer: null,
+};
+
+const $ = (s) => document.querySelector(s);
+
+/* ── helpers ────────────────────────────────────── */
+function fmtSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+function fmtTime(s) {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; }, 2000);
+  setTimeout(() => el.remove(), 2300);
+}
+
+async function api(url, opts = {}) {
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || data.error || '请求失败');
+  return data;
+}
+
+function showSection(id) {
+  ['verify-section', 'upload-section', 'result-section'].forEach(s => $(`#${s}`).classList.remove('active'));
+  $(`#${id}`).classList.add('active');
+}
+
+/* ── terminal command updater ──────────────────── */
+function updateTerminal() {
+  const origin = window.location.origin;
+  const code = S.code || '------';
+  const expiry = S.expiry;
+  $('#term-upload-main').textContent =
+    `curl -X POST ${origin}/api/upload \\\n  -F "file=@/path/to/your/file" \\\n  -F "code=${code}" \\\n  -F "expiry=${expiry}"`;
+  setupCopyBtn('btn-copy-term-main',
+    `curl -X POST ${origin}/api/upload -F "file=@/path/to/file" -F "code=${code}" -F "expiry=${expiry}"`);
+}
+
+/* ── code ───────────────────────────────────────── */
+async function refreshCode() {
+  try {
+    const data = await api('/api/code', { method: 'POST' });
+    S.code = data.code;
+    S.codeExp = Date.now() + data.expiresIn * 1000;
+    $('#code-display').textContent = S.code;
+    $('#code-input').value = '';
+    $('#verify-error').style.display = 'none';
+    updateTerminal();
+    startCodeTimer();
+  } catch (e) {
+    toast('无法生成验证码: ' + e.message, 'error');
+  }
+}
+
+function startCodeTimer() {
+  clearInterval(S.codeTimer);
+  S.codeTimer = setInterval(() => {
+    const remain = Math.max(0, Math.floor((S.codeExp - Date.now()) / 1000));
+    $('#code-timer').textContent = fmtTime(remain);
+    if (remain <= 60) $('#code-timer').style.color = '#f85149';
+    else $('#code-timer').style.color = '';
+    if (remain === 0) {
+      clearInterval(S.codeTimer);
+      $('#code-display').textContent = '已过期';
+      $('#code-display').style.color = '#f85149';
+    }
+  }, 1000);
+}
+
+/* ── expiry ─────────────────────────────────────── */
+document.getElementById('expiry-selector').addEventListener('click', e => {
+  const opt = e.target.closest('.expiry-opt');
+  if (!opt) return;
+  document.querySelectorAll('.expiry-opt').forEach(o => o.classList.remove('selected'));
+  opt.classList.add('selected');
+  S.expiry = opt.dataset.expiry;
+  updateTerminal();
+});
+
+/* ── file selection ─────────────────────────────── */
+const dz = $('#dropzone');
+const fi = $('#file-input');
+
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', () => { if (fi.files[0]) setFile(fi.files[0]); });
+
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+
+document.addEventListener('paste', e => {
+  if (!document.getElementById('upload-section').classList.contains('active')) return;
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind === 'file') { setFile(item.getAsFile()); break; }
+  }
+});
+
+function setFile(f) {
+  S.file = f;
+  const preview = $('#file-preview');
+  preview.innerHTML = `
+    <div class="file-preview">
+      <div class="fp-icon">&#x1F4C4;</div>
+      <div class="fp-info">
+        <div class="fp-name">${f.name}</div>
+        <div class="fp-size">${fmtSize(f.size)}</div>
+      </div>
+      <button class="fp-remove" onclick="clearFile()">&times;</button>
+    </div>
+  `;
+  $('#btn-upload').disabled = false;
+}
+
+function clearFile() {
+  S.file = null;
+  fi.value = '';
+  $('#file-preview').innerHTML = '';
+  $('#btn-upload').disabled = true;
+}
+window.clearFile = clearFile;
+
+/* ── upload ─────────────────────────────────────── */
+$('#btn-upload').addEventListener('click', doUpload);
+
+async function doUpload() {
+  if (!S.file) return;
+  const btn = $('#btn-upload');
+  btn.disabled = true;
+  btn.textContent = '上传中...';
+
+  const pw = $('#progress-wrap');
+  const pf = $('#progress-fill');
+  const pt = $('#progress-text');
+  pw.style.display = 'block';
+  pf.style.width = '0%';
+  pt.textContent = '0%';
+
+  const fd = new FormData();
+  fd.append('file', S.file);
+  fd.append('code', S.code);
+  fd.append('expiry', S.expiry);
+
+  try {
+    const xhr = new XMLHttpRequest();
+    const result = await new Promise((resolve, reject) => {
+      xhr.upload.addEventListener('progress', e => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          pf.style.width = pct + '%';
+          pt.textContent = pct + '%';
+        }
+      });
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
+        else {
+          try { reject(new Error(JSON.parse(xhr.responseText).message)); }
+          catch (_) { reject(new Error('上传失败: ' + xhr.status)); }
+        }
+      });
+      xhr.addEventListener('error', () => reject(new Error('网络错误')));
+      xhr.open('POST', '/api/upload');
+      xhr.send(fd);
+    });
+
+    S.result = result;
+    showResult();
+  } catch (e) {
+    toast(e.message, 'error');
+    btn.disabled = false;
+    btn.textContent = '上传文件';
+    pw.style.display = 'none';
+    if (e.message.includes('验证码')) {
+      showSection('verify-section');
+      refreshCode();
+    }
+  }
+}
+
+/* ── result ─────────────────────────────────────── */
+function showResult() {
+  showSection('result-section');
+  const r = S.result;
+  const origin = window.location.origin;
+  const fullUrl = origin + r.url;
+
+  $('#result-fileinfo').textContent = `${r.originalName}  ·  ${fmtSize(r.size)}`;
+  $('#result-url').value = fullUrl;
+  $('#result-qr').src = `/api/qr?text=${encodeURIComponent(fullUrl)}`;
+  $('#countdown').textContent = '加载中...';
+
+  // terminal download command
+  $('#term-download').textContent = `curl -O ${fullUrl}`;
+
+  // copy buttons
+  setupCopyBtn('btn-copy-url', fullUrl);
+  setupCopyBtn('btn-copy-dl', `curl -O ${fullUrl}`);
+
+  startResultCountdown();
+}
+
+function setupCopyBtn(id, text) {
+  const btn = $('#' + id);
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = '已复制';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 2000);
+    }).catch(() => toast('复制失败', 'error'));
+  });
+}
+
+function startResultCountdown() {
+  clearInterval(S.countdownTimer);
+  S.countdownTimer = setInterval(() => {
+    const remain = Math.max(0, S.result.expiresAt - Date.now());
+    if (remain === 0) {
+      $('#countdown').textContent = '文件已过期';
+      $('#countdown').classList.add('expired');
+      clearInterval(S.countdownTimer);
+      return;
+    }
+    const h = Math.floor(remain / 3600000);
+    const m = Math.floor((remain % 3600000) / 60000);
+    const s = Math.floor((remain % 60000) / 1000);
+    const parts = [];
+    if (h > 0) parts.push(h + 'h');
+    if (m > 0 || h > 0) parts.push(m + 'm');
+    parts.push(s + 's');
+    $('#countdown').textContent = parts.join(' ') + ' 后过期';
+  }, 1000);
+}
+
+/* ── verify ─────────────────────────────────────── */
+$('#btn-verify').addEventListener('click', async () => {
+  const input = $('#code-input').value.trim();
+  if (input.length !== 6 || !/^\d{6}$/.test(input)) {
+    $('#verify-error').textContent = '请输入 6 位数字验证码';
+    $('#verify-error').style.display = 'block';
+    return;
+  }
+  try {
+    await api('/api/validate', { method: 'POST', body: JSON.stringify({ code: input }) });
+    S.code = input;
+    showSection('upload-section');
+  } catch (e) {
+    $('#verify-error').textContent = e.message;
+    $('#verify-error').style.display = 'block';
+  }
+});
+
+$('#code-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('#btn-verify').click();
+});
+$('#code-input').addEventListener('input', () => {
+  $('#verify-error').style.display = 'none';
+});
+
+$('#btn-refresh').addEventListener('click', refreshCode);
+
+$('#btn-new').addEventListener('click', () => {
+  clearFile();
+  clearInterval(S.countdownTimer);
+  $('#progress-wrap').style.display = 'none';
+  showSection('upload-section');
+});
+
+/* ── init ───────────────────────────────────────── */
+refreshCode();
+</script>
+</body>
+</html>
