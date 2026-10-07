@@ -647,7 +647,7 @@ curl -X POST http://localhost:3000/api/upload \
                     <div class="dz-text">拖拽文件到此处上传</div>
                     <div class="dz-hint">
                         或 <kbd>Ctrl</kbd> + <kbd>V</kbd> 粘贴文件 · 单文件最大
-                        50 MB
+                        <span id="max-file-size">加载中...</span>
                     </div>
                 </div>
                 <input type="file" id="file-input" style="display: none" />
@@ -826,6 +826,8 @@ curl -X POST http://localhost:3000/api/retrieve \
                 result: null,
                 extractCode: "",
                 countdownTimer: null,
+                maxSize: null,
+                uploading: false,
             };
 
             const $ = (s) => document.querySelector(s);
@@ -1011,22 +1013,34 @@ curl -X POST http://localhost:3000/api/retrieve \
             });
 
             function setFile(f) {
+                if (!f || S.uploading) return;
+                if (S.maxSize === null) {
+                    toast("正在获取上传限制，请稍后选择文件", "info");
+                    return;
+                }
+                if (f.size > S.maxSize) {
+                    clearFile();
+                    toast("文件过大，最大允许 " + fmtSize(S.maxSize), "error");
+                    return;
+                }
                 S.file = f;
                 const preview = $("#file-preview");
                 preview.innerHTML = `
     <div class="file-preview">
       <div class="fp-icon">&#x1F4C4;</div>
       <div class="fp-info">
-        <div class="fp-name">${f.name}</div>
+        <div class="fp-name"></div>
         <div class="fp-size">${fmtSize(f.size)}</div>
       </div>
       <button class="fp-remove" onclick="clearFile()">&times;</button>
     </div>
   `;
+                preview.querySelector(".fp-name").textContent = f.name;
                 $("#btn-upload").disabled = false;
             }
 
             function clearFile() {
+                if (S.uploading) return;
                 S.file = null;
                 fi.value = "";
                 $("#file-preview").innerHTML = "";
@@ -1038,7 +1052,8 @@ curl -X POST http://localhost:3000/api/retrieve \
             $("#btn-upload").addEventListener("click", doUpload);
 
             async function doUpload() {
-                if (!S.file) return;
+                if (!S.file || S.uploading) return;
+                S.uploading = true;
                 const btn = $("#btn-upload");
                 btn.disabled = true;
                 btn.textContent = "上传中...";
@@ -1068,8 +1083,10 @@ curl -X POST http://localhost:3000/api/retrieve \
                             }
                         });
                         xhr.addEventListener("load", () => {
-                            if (xhr.status >= 200 && xhr.status < 300)
-                                resolve(JSON.parse(xhr.responseText));
+                            if (xhr.status >= 200 && xhr.status < 300) {
+                                try { resolve(JSON.parse(xhr.responseText)); }
+                                catch (_) { reject(new Error("服务器响应异常，请重试")); }
+                            }
                             else {
                                 try {
                                     reject(
@@ -1086,8 +1103,11 @@ curl -X POST http://localhost:3000/api/retrieve \
                             }
                         });
                         xhr.addEventListener("error", () =>
-                            reject(new Error("网络错误")),
+                            reject(new Error("网络连接中断，请检查网络后重试")),
                         );
+                        xhr.timeout = 30 * 60 * 1000;
+                        xhr.addEventListener("timeout", () => reject(new Error("上传超时，请重试")));
+                        xhr.addEventListener("abort", () => reject(new Error("上传已取消")));
                         xhr.open("POST", "/api/upload");
                         xhr.send(fd);
                     });
@@ -1104,6 +1124,10 @@ curl -X POST http://localhost:3000/api/retrieve \
                         showSection("verify-section");
                         refreshCode();
                     }
+                } finally {
+                    S.uploading = false;
+                    btn.disabled = !S.file;
+                    btn.textContent = "上传文件";
                 }
             }
 
@@ -1147,6 +1171,10 @@ curl -X POST http://localhost:3000/api/retrieve \
             }
 
             $("#btn-download").addEventListener("click", () => {
+                if (Date.now() >= S.result.expiresAt) {
+                    toast("文件已过期，请联系分享者重新上传", "error");
+                    return;
+                }
                 window.location.assign($("#result-url").value);
             });
 
@@ -1174,11 +1202,14 @@ curl -X POST http://localhost:3000/api/retrieve \
 
             function startResultCountdown() {
                 clearInterval(S.countdownTimer);
-                S.countdownTimer = setInterval(() => {
+                $("#countdown").classList.remove("expired");
+                $("#btn-download").disabled = false;
+                const update = () => {
                     const remain = Math.max(0, S.result.expiresAt - Date.now());
                     if (remain === 0) {
                         $("#countdown").textContent = "文件已过期";
                         $("#countdown").classList.add("expired");
+                        $("#btn-download").disabled = true;
                         clearInterval(S.countdownTimer);
                         return;
                     }
@@ -1190,7 +1221,10 @@ curl -X POST http://localhost:3000/api/retrieve \
                     if (m > 0 || h > 0) parts.push(m + "m");
                     parts.push(s + "s");
                     $("#countdown").textContent = parts.join(" ") + " 后过期";
-                }, 1000);
+                };
+                update();
+                if (!$("#btn-download").disabled)
+                    S.countdownTimer = setInterval(update, 1000);
             }
 
             /* ── verify ─────────────────────────────────────── */
@@ -1274,6 +1308,15 @@ curl -X POST http://localhost:3000/api/retrieve \
 
             /* ── init ───────────────────────────────────────── */
             refreshCode();
+            api("/api/config")
+                .then((config) => {
+                    S.maxSize = config.maxSize;
+                    $("#max-file-size").textContent = fmtSize(S.maxSize);
+                })
+                .catch(() => {
+                    $("#max-file-size").textContent = "暂时无法获取";
+                    toast("无法获取上传限制，请刷新页面重试", "error");
+                });
         </script>
     </body>
 </html>

@@ -166,9 +166,11 @@
   <div class="footer">TempShare · 限时文件分享 · 文件到期后自动删除</div>
 </div>
 
+<!-- ERROR_CONTEXT -->
 <script>
 (function () {
-  var q = new URLSearchParams(location.search);
+  var context = document.getElementById('error-context');
+  var q = context ? new URLSearchParams(JSON.parse(context.textContent)) : new URLSearchParams(location.search);
   var code = q.get('code') || '404';
   var title = q.get('title') || '文件不存在或已过期';
   var desc = q.get('desc') || '该链接已被删除、已过期或从未存在过。请向分享者确认，或返回首页生成新的链接。';
@@ -181,7 +183,7 @@
 
   document.getElementById('status-text').textContent = label;
   document.getElementById('title').textContent = title;
-  document.getElementById('desc').innerHTML = desc.split('。').filter(Boolean).join('。<br>') || desc;
+  document.getElementById('desc').textContent = desc;
   document.getElementById('meta-file').textContent = file;
 
   document.title = title + ' · TempShare';

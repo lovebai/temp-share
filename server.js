@@ -108,6 +108,7 @@ const upload = multer({ storage, limits: { fileSize: MAX_SIZE } });
 /* ── middleware ───────────────────────────────────── */
 app.use(express.json());
 app.use(express.static('public'));
+app.get('/api/config', (_req, res) => res.json({ maxSize: MAX_SIZE }));
 
 /* ── API: generate code ──────────────────────────── */
 app.post('/api/code', (_req, res) => {
@@ -184,7 +185,9 @@ function sendErrorPage(res, status, file) {
       : '该链接已被删除、已过期或从未存在过。请向分享者确认，或返回首页生成新的链接。',
   });
   if (file) q.set('file', file);
-  res.status(status).sendFile(path.join(__dirname, 'public', 'error.html'));
+  const template = fs.readFileSync(path.join(__dirname, 'public', 'error.html'), 'utf8');
+  res.status(status).type('html').send(template.replace('<!-- ERROR_CONTEXT -->',
+    `<script id="error-context" type="application/json">${JSON.stringify(Object.fromEntries(q)).replace(/</g, '\\u003c')}</script>`));
 }
 
 /* ── API: download ───────────────────────────────── */
@@ -268,6 +271,21 @@ app.post('/api/retrieve', (req, res) => {
     remaining:    meta.expiresAt - Date.now(),
     expiry:       meta.expiry,
   });
+});
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (req.file) safeUnlink(req.file.path);
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? `文件过大，单文件最大 ${MAX_SIZE / 1024 / 1024} MB`
+      : '上传格式不正确，请仅选择一个文件重试';
+    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code, message });
+  }
+  const message = ['ENOSPC', 'EDQUOT'].includes(err.code)
+    ? '服务器存储空间不足，请稍后重试'
+    : '请求处理失败，请稍后重试';
+  res.status(500).json({ error: 'server_error', message });
 });
 
 /* ── 404 catch-all ─────────────────────────────── */
