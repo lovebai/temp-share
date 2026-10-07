@@ -138,6 +138,8 @@ setInterval(() => { purgeCodes(); purgeFiles(); purgeOrphans(); }, 30_000);
 /* ── multer ──────────────────────────────────────── */
 const storage = {
   _handleFile(req, file, cb) {
+    let settled;
+    (req.uploadSettlements ||= []).push(new Promise(resolve => { settled = resolve; }));
     const filename = uuidv4() + path.extname(file.originalname);
     const fp = path.join(UPLOAD_DIR, filename);
     activeUploads.add(fp);
@@ -155,13 +157,23 @@ const storage = {
     const output = fs.createWriteStream(fp);
     const abort = () => quota.destroy(Object.assign(new Error('上传已取消'), { code: 'UPLOAD_ABORTED' }));
     req.once('aborted', abort);
-    pipeline(file.stream, quota, output, err => {
+    file.stream.on('error', err => quota.destroy(err));
+    file.stream.pipe(quota);
+    pipeline(quota, output, err => {
       req.removeListener('aborted', abort);
       if (err) {
-        activeUploads.delete(fp);
-        safeUnlink(fp);
-        return cb(err);
+        file.stream.unpipe(quota);
+        file.stream.resume();
+        const cleanup = () => {
+          activeUploads.delete(fp);
+          safeUnlink(fp);
+          settled();
+          cb(err);
+        };
+        if (output.closed) cleanup(); else output.once('close', cleanup);
+        return;
       }
+      settled();
       cb(null, { destination: UPLOAD_DIR, filename, path: fp, size: storedSizes.get(fp) });
     });
   },
@@ -172,6 +184,11 @@ const storage = {
   }
 };
 const upload = multer({ storage, limits: { fileSize: MAX_SIZE, files: MAX_FILES, fields: 4 } });
+function uploadHandler(parser) {
+  return (req, res, next) => parser(req, res, err => {
+    Promise.all(req.uploadSettlements || []).then(() => next(err), next);
+  });
+}
 
 /* ── middleware ───────────────────────────────────── */
 app.use(express.json());
@@ -273,8 +290,8 @@ function saveUploads(req, res) {
   }
   res.json(req.files ? { files: saved } : saved[0]);
 }
-app.post('/api/upload', upload.single('file'), saveUploads);
-app.post('/api/upload-batch', upload.array('files', MAX_FILES), saveUploads);
+app.post('/api/upload', uploadHandler(upload.single('file')), saveUploads);
+app.post('/api/upload-batch', uploadHandler(upload.array('files', MAX_FILES)), saveUploads);
 
 function publicMeta(meta) {
   return {
@@ -416,12 +433,12 @@ app.use((err, req, res, next) => {
   if (req.file) safeUnlink(req.file.path);
   for (const file of req.files || []) { activeUploads.delete(file.path); safeUnlink(file.path); }
   if (req.file) activeUploads.delete(req.file.path);
-  if (err.code === 'STORAGE_FULL') return res.status(507).json({ error: err.code, message: '服务器分享容量已满，请稍后重试' });
+  if (err.code === 'STORAGE_FULL') return res.set('Connection', 'close').status(507).json({ error: err.code, message: '服务器分享容量已满，请稍后重试' });
   if (err instanceof multer.MulterError) {
     const message = err.code === 'LIMIT_FILE_SIZE'
       ? `文件过大，单文件最大 ${MAX_SIZE / 1024 / 1024} MB`
       : `上传格式不正确，最多选择 ${MAX_FILES} 个文件`;
-    return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code, message });
+    return res.set('Connection', 'close').status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code, message });
   }
   const message = ['ENOSPC', 'EDQUOT'].includes(err.code)
     ? '服务器存储空间不足，请稍后重试'

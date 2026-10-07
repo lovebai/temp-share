@@ -4,7 +4,8 @@
   "description": "Temporary file sharing - time-limited links with auto-expiry",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.0",

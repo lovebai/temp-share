@@ -824,6 +824,7 @@ curl -X POST http://localhost:3000/api/retrieve \
                     <button class="btn btn-secondary" id="btn-copy-share">复制分享信息</button>
                     <button class="btn btn-secondary" id="btn-delete" style="display: none">提前删除文件</button>
                 </div>
+                <div id="delete-hint" style="display: none; margin-top: 8px; font-size: 11px; color: #8b949e">删除权限仅保留在当前页面，请勿关闭后再尝试删除。</div>
                 <div id="delete-confirm" style="display: none; margin-top: 12px; font-size: 12px">
                     删除后，链接和提取码将立即失效。
                     <div class="action-row">
@@ -981,6 +982,7 @@ curl -X POST http://localhost:3000/api/retrieve \
                     S.code = data.code;
                     S.codeExp = Date.now() + data.expiresIn * 1000;
                     $("#code-display").textContent = S.code;
+                    $("#code-display").style.color = "";
                     $("#code-input").value = "";
                     $("#verify-error").style.display = "none";
                     updateTerminal();
@@ -1216,6 +1218,7 @@ curl -X POST http://localhost:3000/api/retrieve \
                 S.resultUnavailable = !!r.deleted;
                 $("#delete-confirm").style.display = "none";
                 $("#btn-delete").style.display = mode === "upload" && r.deleteToken ? "inline-block" : "none";
+                $("#delete-hint").style.display = mode === "upload" && r.deleteToken ? "block" : "none";
                 $("#btn-delete").disabled = !!r.deleted;
                 $("#download-count").textContent = r.maxDownloads ? `最多下载 ${r.maxDownloads} 次 · 剩余 ${r.remainingDownloads} 次` : "不限下载次数";
                 const list = $("#batch-files");
