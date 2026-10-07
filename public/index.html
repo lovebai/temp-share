@@ -1217,6 +1217,7 @@ curl -X POST http://localhost:3000/api/retrieve \
                 const fullUrl = origin + r.url;
                 S.resultUnavailable = !!r.deleted;
                 $("#delete-confirm").style.display = "none";
+                $("#btn-copy-share").style.display = mode === "upload" ? "inline-block" : "none";
                 $("#btn-delete").style.display = mode === "upload" && r.deleteToken ? "inline-block" : "none";
                 $("#delete-hint").style.display = mode === "upload" && r.deleteToken ? "block" : "none";
                 $("#btn-delete").disabled = !!r.deleted;

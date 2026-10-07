@@ -64,6 +64,7 @@ test('page sharing, manual copy, batch selection, deletion and expired state', a
   ui.S.result = first;
   ui.showResult('upload');
   assert.equal(get('result-extract-block').style.display, 'block');
+  assert.equal(get('btn-copy-share').style.display, 'inline-block');
   assert.equal(get('btn-download').style.display, 'none');
   assert.equal(get('batch-files').children.length, 2);
   get('batch-files').children[1].click();
@@ -83,6 +84,7 @@ test('page sharing, manual copy, batch selection, deletion and expired state', a
   ui.S.result = first;
   ui.showResult('retrieve');
   assert.equal(get('result-extract-block').style.display, 'none');
+  assert.equal(get('btn-copy-share').style.display, 'none');
   assert.equal(get('btn-download').style.display, 'inline-block');
   assert.equal(get('btn-delete').style.display, 'none');
   first.expiresAt = Date.now() - 1;
