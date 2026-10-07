@@ -770,6 +770,13 @@ curl -X POST http://localhost:3000/api/retrieve \
                                 复制
                             </button>
                         </div>
+                        <button
+                            class="btn btn-primary"
+                            id="btn-download"
+                            style="display: none; margin-top: 12px"
+                        >
+                            下载文件
+                        </button>
                     </div>
                     <img class="result-qr" id="result-qr" src="" alt="QR" />
                 </div>
@@ -1113,6 +1120,8 @@ curl -X POST http://localhost:3000/api/retrieve \
                 $("#result-fileinfo").textContent =
                     `${r.originalName}  ·  ${fmtSize(r.size)}`;
                 $("#result-url").value = fullUrl;
+                $("#btn-download").style.display =
+                    mode === "retrieve" ? "inline-block" : "none";
                 $("#result-qr").src =
                     `/api/qr?text=${encodeURIComponent(fullUrl)}`;
                 $("#countdown").textContent = "加载中...";
@@ -1136,6 +1145,10 @@ curl -X POST http://localhost:3000/api/retrieve \
 
                 startResultCountdown();
             }
+
+            $("#btn-download").addEventListener("click", () => {
+                window.location.assign($("#result-url").value);
+            });
 
             function setupCopyBtn(id, text) {
                 const btn = $("#" + id);
