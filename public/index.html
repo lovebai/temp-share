@@ -368,8 +368,18 @@
             }
             .result-left {
                 flex: 1;
-                min-width: 200px;
+                min-width: 0;
             }
+            .input { min-width: 0; }
+            #result-fileinfo { overflow-wrap: anywhere; }
+            .action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+            .upload-options { margin-top: 16px; font-size: 12px; color: #8b949e; }
+            .upload-options select { margin-left: 8px; padding: 8px; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; }
+            #batch-files { margin-bottom: 16px; display: flex; flex-direction: column; gap: 8px; }
+            #batch-files button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+            dialog { margin: auto; width: min(90vw, 520px); background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 12px; padding: 24px; }
+            dialog::backdrop { background: #0009; }
+            dialog textarea { width: 100%; min-height: 150px; margin-top: 16px; background: #0d1117; color: #c9d1d9; padding: 12px; }
             .result-qr {
                 width: 140px;
                 height: 140px;
@@ -567,6 +577,11 @@
                 .header h1 {
                     font-size: 22px;
                 }
+                .result-row { flex-direction: column; }
+                .result-left { width: 100%; }
+                .result-qr { align-self: center; }
+                .result-url { gap: 6px; }
+                .action-row .btn { flex: 1; padding: 12px; }
             }
         </style>
     </head>
@@ -574,7 +589,7 @@
         <div class="container">
             <div class="header">
                 <h1>&#x25C7; TempShare</h1>
-                <p>限时文件分享 · 阅后即焚 · 端到端</p>
+                <p>限时文件分享 · 到期自动删除</p>
             </div>
 
             <div class="tabs" id="tabs">
@@ -650,7 +665,7 @@ curl -X POST http://localhost:3000/api/upload \
                         <span id="max-file-size">加载中...</span>
                     </div>
                 </div>
-                <input type="file" id="file-input" style="display: none" />
+                <input type="file" id="file-input" multiple style="display: none" />
                 <div class="expiry-selector" id="expiry-selector">
                     <div class="expiry-opt" data-expiry="5m">5分钟</div>
                     <div class="expiry-opt selected" data-expiry="30m">
@@ -662,6 +677,17 @@ curl -X POST http://localhost:3000/api/upload \
                     <div class="expiry-opt" data-expiry="24h">24小时</div>
                 </div>
                 <div id="file-preview"></div>
+                <div class="upload-options">
+                    <label for="download-limit">每个文件最多下载</label>
+                    <select id="download-limit">
+                        <option value="0">不限次数</option>
+                        <option value="1">1 次</option>
+                        <option value="3">3 次</option>
+                        <option value="5">5 次</option>
+                        <option value="10">10 次</option>
+                    </select>
+                    <div style="margin-top: 8px" id="batch-hint"></div>
+                </div>
                 <div
                     class="progress-wrap"
                     id="progress-wrap"
@@ -673,6 +699,7 @@ curl -X POST http://localhost:3000/api/upload \
                     <div class="progress-text" id="progress-text">0%</div>
                 </div>
                 <div style="margin-top: 16px; text-align: right">
+                    <button class="btn btn-secondary" id="btn-cancel" style="display: none">取消上传</button>
                     <button class="btn btn-primary" id="btn-upload" disabled>
                         上传文件
                     </button>
@@ -754,6 +781,7 @@ curl -X POST http://localhost:3000/api/retrieve \
                         复制提取码
                     </button>
                 </div>
+                <div id="batch-files"></div>
                 <div class="result-row">
                     <div class="result-left">
                         <div class="label" style="margin-bottom: 6px">
@@ -791,6 +819,18 @@ curl -X POST http://localhost:3000/api/retrieve \
                     <button class="term-copy" id="btn-copy-dl">复制</button>
                 </div>
                 <div class="countdown" id="countdown"></div>
+                <div id="download-count" style="margin-top: 8px; font-size: 12px; color: #8b949e"></div>
+                <div class="action-row">
+                    <button class="btn btn-secondary" id="btn-copy-share">复制分享信息</button>
+                    <button class="btn btn-secondary" id="btn-delete" style="display: none">提前删除文件</button>
+                </div>
+                <div id="delete-confirm" style="display: none; margin-top: 12px; font-size: 12px">
+                    删除后，链接和提取码将立即失效。
+                    <div class="action-row">
+                        <button class="btn btn-secondary" id="btn-delete-confirm">确认删除</button>
+                        <button class="btn btn-secondary" id="btn-delete-cancel">取消</button>
+                    </div>
+                </div>
                 <div style="margin-top: 20px; text-align: right">
                     <button class="btn btn-secondary" id="btn-new">
                         上传新文件
@@ -812,6 +852,11 @@ curl -X POST http://localhost:3000/api/retrieve \
                 >
             </div>
         </div>
+        <dialog id="copy-dialog">
+            <p>自动复制不可用，请选择以下内容手动复制。</p>
+            <textarea id="manual-copy" readonly aria-label="待复制内容"></textarea>
+            <div class="action-row"><button class="btn btn-secondary" id="btn-close-copy">关闭</button></div>
+        </dialog>
 
         <script>
             /* ── state ──────────────────────────────────────── */
@@ -828,6 +873,11 @@ curl -X POST http://localhost:3000/api/retrieve \
                 countdownTimer: null,
                 maxSize: null,
                 uploading: false,
+                files: [],
+                batch: [],
+                maxFiles: 20,
+                xhr: null,
+                resultUnavailable: false,
             };
 
             const $ = (s) => document.querySelector(s);
@@ -864,8 +914,11 @@ curl -X POST http://localhost:3000/api/retrieve \
                     ...opts,
                 });
                 const data = await res.json();
-                if (!res.ok)
-                    throw new Error(data.message || data.error || "请求失败");
+                if (!res.ok) {
+                    const err = new Error(data.message || data.error || "请求失败");
+                    err.status = res.status;
+                    throw err;
+                }
                 return data;
             }
 
@@ -881,6 +934,7 @@ curl -X POST http://localhost:3000/api/retrieve \
 
             /* ── mode tabs ─────────────────────────────────── */
             function setMode(mode) {
+                if (S.uploading) { toast("请先完成或取消上传", "info"); return; }
                 if (mode === S.mode) return;
                 S.mode = mode;
                 document
@@ -974,7 +1028,7 @@ curl -X POST http://localhost:3000/api/retrieve \
 
             dz.addEventListener("click", () => fi.click());
             fi.addEventListener("change", () => {
-                if (fi.files[0]) setFile(fi.files[0]);
+                if (fi.files.length) setFiles(Array.from(fi.files));
             });
 
             dz.addEventListener("dragover", (e) => {
@@ -987,7 +1041,7 @@ curl -X POST http://localhost:3000/api/retrieve \
             dz.addEventListener("drop", (e) => {
                 e.preventDefault();
                 dz.classList.remove("dragover");
-                if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+                if (e.dataTransfer.files.length) setFiles(Array.from(e.dataTransfer.files));
             });
 
             document.addEventListener("paste", (e) => {
@@ -1004,44 +1058,56 @@ curl -X POST http://localhost:3000/api/retrieve \
                     return;
                 const items = e.clipboardData?.items;
                 if (!items) return;
-                for (const item of items) {
-                    if (item.kind === "file") {
-                        setFile(item.getAsFile());
-                        break;
-                    }
-                }
+                const files = Array.from(items).filter(item => item.kind === "file").map(item => item.getAsFile()).filter(Boolean);
+                if (files.length) setFiles(files);
             });
 
-            function setFile(f) {
-                if (!f || S.uploading) return;
+            function setFiles(files) {
+                if (!files.length || S.uploading) return;
                 if (S.maxSize === null) {
                     toast("正在获取上传限制，请稍后选择文件", "info");
                     return;
                 }
-                if (f.size > S.maxSize) {
+                if (files.length > S.maxFiles) {
+                    toast(`最多选择 ${S.maxFiles} 个文件`, "error");
+                    return;
+                }
+                if (files.some(f => f.size > S.maxSize)) {
                     clearFile();
                     toast("文件过大，最大允许 " + fmtSize(S.maxSize), "error");
                     return;
                 }
-                S.file = f;
+                S.files = files;
+                S.file = files[0];
                 const preview = $("#file-preview");
-                preview.innerHTML = `
+                preview.replaceChildren();
+                files.forEach((f, index) => {
+                const row = document.createElement("div");
+                row.innerHTML = `
     <div class="file-preview">
       <div class="fp-icon">&#x1F4C4;</div>
       <div class="fp-info">
         <div class="fp-name"></div>
         <div class="fp-size">${fmtSize(f.size)}</div>
       </div>
-      <button class="fp-remove" onclick="clearFile()">&times;</button>
+      <button class="fp-remove" aria-label="移除文件">&times;</button>
     </div>
   `;
-                preview.querySelector(".fp-name").textContent = f.name;
+                row.querySelector(".fp-name").textContent = f.name;
+                row.querySelector(".fp-remove").addEventListener("click", () => {
+                    if (S.uploading) return;
+                    const remaining = S.files.filter((_, i) => i !== index);
+                    if (remaining.length) setFiles(remaining); else clearFile();
+                });
+                preview.appendChild(row);
+                });
                 $("#btn-upload").disabled = false;
             }
 
             function clearFile() {
                 if (S.uploading) return;
                 S.file = null;
+                S.files = [];
                 fi.value = "";
                 $("#file-preview").innerHTML = "";
                 $("#btn-upload").disabled = true;
@@ -1057,6 +1123,8 @@ curl -X POST http://localhost:3000/api/retrieve \
                 const btn = $("#btn-upload");
                 btn.disabled = true;
                 btn.textContent = "上传中...";
+                $("#btn-cancel").style.display = "inline-block";
+                $("#download-limit").disabled = true;
 
                 const pw = $("#progress-wrap");
                 const pf = $("#progress-fill");
@@ -1066,12 +1134,15 @@ curl -X POST http://localhost:3000/api/retrieve \
                 pt.textContent = "0%";
 
                 const fd = new FormData();
-                fd.append("file", S.file);
+                const batch = S.files.length > 1;
+                for (const file of S.files) fd.append(batch ? "files" : "file", file);
                 fd.append("code", S.code);
                 fd.append("expiry", S.expiry);
+                fd.append("maxDownloads", $("#download-limit").value);
 
                 try {
                     const xhr = new XMLHttpRequest();
+                    S.xhr = xhr;
                     const result = await new Promise((resolve, reject) => {
                         xhr.upload.addEventListener("progress", (e) => {
                             if (e.lengthComputable) {
@@ -1108,12 +1179,13 @@ curl -X POST http://localhost:3000/api/retrieve \
                         xhr.timeout = 30 * 60 * 1000;
                         xhr.addEventListener("timeout", () => reject(new Error("上传超时，请重试")));
                         xhr.addEventListener("abort", () => reject(new Error("上传已取消")));
-                        xhr.open("POST", "/api/upload");
+                        xhr.open("POST", batch ? "/api/upload-batch" : "/api/upload");
                         xhr.send(fd);
                     });
 
-                    S.result = result;
-                    S.extractCode = result.extractCode || "";
+                    S.batch = result.files || [result];
+                    S.result = S.batch[0];
+                    S.extractCode = S.result.extractCode || "";
                     showResult("upload");
                 } catch (e) {
                     toast(e.message, "error");
@@ -1126,6 +1198,9 @@ curl -X POST http://localhost:3000/api/retrieve \
                     }
                 } finally {
                     S.uploading = false;
+                    S.xhr = null;
+                    $("#btn-cancel").style.display = "none";
+                    $("#download-limit").disabled = false;
                     btn.disabled = !S.file;
                     btn.textContent = "上传文件";
                 }
@@ -1138,6 +1213,22 @@ curl -X POST http://localhost:3000/api/retrieve \
                 const r = S.result;
                 const origin = window.location.origin;
                 const fullUrl = origin + r.url;
+                S.resultUnavailable = !!r.deleted;
+                $("#delete-confirm").style.display = "none";
+                $("#btn-delete").style.display = mode === "upload" && r.deleteToken ? "inline-block" : "none";
+                $("#btn-delete").disabled = !!r.deleted;
+                $("#download-count").textContent = r.maxDownloads ? `最多下载 ${r.maxDownloads} 次 · 剩余 ${r.remainingDownloads} 次` : "不限下载次数";
+                const list = $("#batch-files");
+                list.replaceChildren();
+                if (mode === "upload" && S.batch.length > 1) {
+                    S.batch.forEach(file => {
+                        const button = document.createElement("button");
+                        button.className = "btn btn-secondary";
+                        button.textContent = `${file === r ? "✓ " : ""}${file.originalName}${file.deleted ? "（已删除）" : ""}`;
+                        button.addEventListener("click", () => { S.result = file; showResult("upload"); });
+                        list.appendChild(button);
+                    });
+                }
 
                 $("#result-title").textContent =
                     mode === "upload" ? "\u2713 上传成功" : "\u2713 提取成功";
@@ -1158,24 +1249,40 @@ curl -X POST http://localhost:3000/api/retrieve \
                 }
 
                 // terminal download command
-                $("#term-download").textContent = `curl -O ${fullUrl}`;
+                const downloadCommand = `curl --fail --show-error --location --remote-name --remote-header-name '${fullUrl}'`;
+                $("#term-download").textContent = downloadCommand;
                 $("#btn-new").textContent =
                     mode === "upload" ? "上传新文件" : "返回提取";
 
                 // copy buttons
                 setupCopyBtn("btn-copy-url", fullUrl);
-                setupCopyBtn("btn-copy-dl", `curl -O ${fullUrl}`);
+                setupCopyBtn("btn-copy-dl", downloadCommand);
                 setupCopyBtn("btn-copy-extract", r.extractCode || "");
+                setupCopyBtn("btn-copy-share", `文件：${r.originalName}\n提取码：${r.extractCode}\n提取链接：${origin}/?code=${r.extractCode}\n下载链接：${fullUrl}\n有效期至：${new Date(r.expiresAt).toLocaleString()}${r.maxDownloads ? `\n最多下载：${r.maxDownloads} 次` : ""}`);
 
                 startResultCountdown();
             }
 
-            $("#btn-download").addEventListener("click", () => {
+            $("#btn-download").addEventListener("click", async () => {
                 if (Date.now() >= S.result.expiresAt) {
                     toast("文件已过期，请联系分享者重新上传", "error");
                     return;
                 }
-                window.location.assign($("#result-url").value);
+                const result = S.result;
+                const btn = $("#btn-download");
+                btn.disabled = true;
+                try {
+                    const info = await api(`/api/info/${result.id}`);
+                    if (S.result !== result) return;
+                    result.remainingDownloads = info.remainingDownloads;
+                    window.location.assign($("#result-url").value);
+                } catch (err) {
+                    if (S.result !== result) return;
+                    toast(err.message, "error");
+                    if (err.status === 404 || err.status === 410) S.resultUnavailable = true;
+                } finally {
+                    if (S.result === result) btn.disabled = S.resultUnavailable || Date.now() >= result.expiresAt;
+                }
             });
 
             function setupCopyBtn(id, text) {
@@ -1183,33 +1290,39 @@ curl -X POST http://localhost:3000/api/retrieve \
                 btn._copyText = text;
                 if (btn._bound) return;
                 btn._bound = true;
-                btn.addEventListener("click", () => {
+                const label = btn.textContent;
+                btn.addEventListener("click", async () => {
                     const t = btn._copyText;
                     if (!t) return;
-                    navigator.clipboard
-                        .writeText(t)
-                        .then(() => {
+                    try {
+                        if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+                        await navigator.clipboard.writeText(t);
                             btn.textContent = "已复制";
                             btn.classList.add("copied");
                             setTimeout(() => {
-                                btn.textContent = "复制";
+                                btn.textContent = label;
                                 btn.classList.remove("copied");
                             }, 2000);
-                        })
-                        .catch(() => toast("复制失败", "error"));
+                    } catch (_) {
+                        $("#manual-copy").value = t;
+                        $("#copy-dialog").showModal();
+                        $("#manual-copy").focus();
+                        $("#manual-copy").select();
+                    }
                 });
             }
 
             function startResultCountdown() {
                 clearInterval(S.countdownTimer);
                 $("#countdown").classList.remove("expired");
-                $("#btn-download").disabled = false;
+                $("#btn-download").disabled = S.resultUnavailable;
                 const update = () => {
                     const remain = Math.max(0, S.result.expiresAt - Date.now());
-                    if (remain === 0) {
-                        $("#countdown").textContent = "文件已过期";
+                    if (remain === 0 || S.resultUnavailable) {
+                        $("#countdown").textContent = S.result.deleted ? "文件已删除" : S.resultUnavailable ? "文件已失效" : "文件已过期";
                         $("#countdown").classList.add("expired");
                         $("#btn-download").disabled = true;
+                        $("#btn-delete").disabled = true;
                         clearInterval(S.countdownTimer);
                         return;
                     }
@@ -1274,6 +1387,7 @@ curl -X POST http://localhost:3000/api/retrieve \
                     return;
                 }
                 const btn = $("#btn-retrieve");
+                if (btn.disabled) return;
                 btn.disabled = true;
                 btn.textContent = "提取中...";
                 api("/api/retrieve", {
@@ -1311,12 +1425,37 @@ curl -X POST http://localhost:3000/api/retrieve \
             api("/api/config")
                 .then((config) => {
                     S.maxSize = config.maxSize;
+                    S.maxFiles = config.maxFiles;
+                    $("#batch-hint").textContent = `最多选择 ${S.maxFiles} 个文件，每个文件单独生成提取码。`;
                     $("#max-file-size").textContent = fmtSize(S.maxSize);
                 })
                 .catch(() => {
                     $("#max-file-size").textContent = "暂时无法获取";
                     toast("无法获取上传限制，请刷新页面重试", "error");
                 });
+            $("#btn-cancel").addEventListener("click", () => S.xhr?.abort());
+            $("#btn-close-copy").addEventListener("click", () => $("#copy-dialog").close());
+            $("#btn-delete").addEventListener("click", () => $("#delete-confirm").style.display = "block");
+            $("#btn-delete-cancel").addEventListener("click", () => $("#delete-confirm").style.display = "none");
+            $("#btn-delete-confirm").addEventListener("click", async () => {
+                const result = S.result;
+                const btn = $("#btn-delete-confirm");
+                btn.disabled = true;
+                try {
+                    await api(`/api/files/${result.id}`, { method: "DELETE", headers: { "X-Delete-Token": result.deleteToken } });
+                    result.deleted = true;
+                    if (S.result === result) showResult("upload");
+                    toast("文件已删除，分享链接已失效", "success");
+                } catch (err) { toast(err.message, "error"); }
+                finally { btn.disabled = false; }
+            });
+            const sharedCode = new URLSearchParams(location.search).get("code");
+            if (/^\d{6}$/.test(sharedCode || "")) {
+                setMode("retrieve");
+                $("#retrieve-input").value = sharedCode;
+                S.extractCode = sharedCode;
+                updateTerminal();
+            }
         </script>
     </body>
 </html>

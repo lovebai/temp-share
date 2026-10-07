@@ -328,8 +328,10 @@ app.get('/api/download/:id', (req, res) => {
 
   const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
   if (unavailable(meta)) {
-    safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
-    safeUnlink(mp);
+    if (Date.now() >= meta.expiresAt) {
+      safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
+      safeUnlink(mp);
+    }
     return sendErrorPage(res, 410, meta.originalName, !!(meta.maxDownloads && meta.downloads >= meta.maxDownloads));
   }
 
@@ -398,8 +400,10 @@ app.post('/api/retrieve', (req, res) => {
 
   const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
   if (unavailable(meta)) {
-    safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
-    safeUnlink(mp);
+    if (Date.now() >= meta.expiresAt) {
+      safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
+      safeUnlink(mp);
+    }
     return res.status(410).json({ error: 'expired', message: '文件已过期或下载次数已用完' });
   }
 
