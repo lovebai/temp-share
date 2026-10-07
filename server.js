@@ -302,7 +302,7 @@ app.delete('/api/files/:id', rateLimit('delete', 20), (req, res) => {
 });
 
 /* ── error page ─────────────────────────────────── */
-function sendErrorPage(res, status, file) {
+function sendErrorPage(res, status, file, exhausted = false) {
   const q = new URLSearchParams({
     code: String(status),
     title: status === 410 ? '文件已过期' : '文件不存在或已过期',
@@ -310,6 +310,10 @@ function sendErrorPage(res, status, file) {
       ? '该文件已超过可分享时限，已被自动删除。请联系分享者重新上传。'
       : '该链接已被删除、已过期或从未存在过。请向分享者确认，或返回首页生成新的链接。',
   });
+  if (exhausted) {
+    q.set('title', '下载次数已用完');
+    q.set('desc', '该文件已达到下载次数限制。请联系分享者重新上传。');
+  }
   if (file) q.set('file', file);
   const template = fs.readFileSync(path.join(__dirname, 'public', 'error.html'), 'utf8');
   res.status(status).type('html').send(template.replace('<!-- ERROR_CONTEXT -->',
@@ -318,20 +322,36 @@ function sendErrorPage(res, status, file) {
 
 /* ── API: download ───────────────────────────────── */
 app.get('/api/download/:id', (req, res) => {
+  if (!validId(req.params.id)) return sendErrorPage(res, 404);
   const mp = path.join(META_DIR, `${req.params.id}.json`);
   if (!fs.existsSync(mp)) return sendErrorPage(res, 404);
 
   const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
-  if (Date.now() > meta.expiresAt) {
+  if (unavailable(meta)) {
     safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
     safeUnlink(mp);
-    return sendErrorPage(res, 410, meta.originalName);
+    return sendErrorPage(res, 410, meta.originalName, !!(meta.maxDownloads && meta.downloads >= meta.maxDownloads));
   }
 
   const fp = path.join(UPLOAD_DIR, meta.storedName);
   if (!fs.existsSync(fp)) return sendErrorPage(res, 404, meta.originalName);
 
-  res.download(fp, meta.originalName);
+  if (req.method === 'HEAD') return res.download(fp, meta.originalName);
+  // Limited downloads must be complete requests; a range must not consume the last slot.
+  if (meta.maxDownloads && req.get('Range')) return res.status(400).json({ message: '次数受限文件请完整下载，不支持分段下载' });
+  meta.downloads = (meta.downloads || 0) + 1;
+  fs.writeFileSync(mp, JSON.stringify(meta, null, 2));
+  res.set('Cache-Control', 'no-store');
+  res.download(fp, meta.originalName, { acceptRanges: !meta.maxDownloads }, err => {
+    if (err && fs.existsSync(mp)) {
+      try {
+        const current = JSON.parse(fs.readFileSync(mp, 'utf8'));
+        current.downloads = Math.max(0, (current.downloads || 0) - 1);
+        fs.writeFileSync(mp, JSON.stringify(current, null, 2));
+      } catch (_) { /* cleanup handles missing metadata */ }
+    }
+    if (err && !res.headersSent) res.status(500).json({ message: '下载失败，请重试' });
+  });
 });
 
 /* ── API: generate QR code (local) ──────────────── */
@@ -351,21 +371,17 @@ app.get('/api/qr', async (req, res) => {
 
 /* ── API: file info ──────────────────────────────── */
 app.get('/api/info/:id', (req, res) => {
+  if (!validId(req.params.id)) return res.status(404).json({ message: '文件不存在' });
   const mp = path.join(META_DIR, `${req.params.id}.json`);
   if (!fs.existsSync(mp)) return res.status(404).json({ error: '文件不存在或已过期' });
 
   const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
-  if (Date.now() > meta.expiresAt) {
-    return res.status(410).json({ error: '文件已过期' });
+  if (unavailable(meta)) {
+    return res.status(410).json({ message: '文件已过期或下载次数已用完' });
   }
 
-  res.json({
-    id:           meta.id,
-    originalName: meta.originalName,
-    size:         meta.size,
-    expiresAt:    meta.expiresAt,
-    remaining:    meta.expiresAt - Date.now(),
-  });
+  if (!fs.existsSync(path.join(UPLOAD_DIR, meta.storedName))) return res.status(404).json({ message: '文件不存在' });
+  res.json(publicMeta(meta));
 });
 
 /* ── API: retrieve by extraction code ───────────── */
@@ -381,31 +397,26 @@ app.post('/api/retrieve', (req, res) => {
   }
 
   const meta = JSON.parse(fs.readFileSync(mp, 'utf8'));
-  if (Date.now() > meta.expiresAt) {
+  if (unavailable(meta)) {
     safeUnlink(path.join(UPLOAD_DIR, meta.storedName));
     safeUnlink(mp);
-    return res.status(410).json({ error: 'expired', message: '文件已过期' });
+    return res.status(410).json({ error: 'expired', message: '文件已过期或下载次数已用完' });
   }
 
-  res.json({
-    id:           meta.id,
-    extractCode:  meta.extractCode,
-    url:          `/api/download/${meta.id}`,
-    originalName: meta.originalName,
-    size:         meta.size,
-    expiresAt:    meta.expiresAt,
-    remaining:    meta.expiresAt - Date.now(),
-    expiry:       meta.expiry,
-  });
+  if (!fs.existsSync(path.join(UPLOAD_DIR, meta.storedName))) return res.status(404).json({ message: '文件不存在' });
+  res.json(publicMeta(meta));
 });
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   if (req.file) safeUnlink(req.file.path);
+  for (const file of req.files || []) { activeUploads.delete(file.path); safeUnlink(file.path); }
+  if (req.file) activeUploads.delete(req.file.path);
+  if (err.code === 'STORAGE_FULL') return res.status(507).json({ error: err.code, message: '服务器分享容量已满，请稍后重试' });
   if (err instanceof multer.MulterError) {
     const message = err.code === 'LIMIT_FILE_SIZE'
       ? `文件过大，单文件最大 ${MAX_SIZE / 1024 / 1024} MB`
-      : '上传格式不正确，请仅选择一个文件重试';
+      : `上传格式不正确，最多选择 ${MAX_FILES} 个文件`;
     return res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code, message });
   }
   const message = ['ENOSPC', 'EDQUOT'].includes(err.code)
